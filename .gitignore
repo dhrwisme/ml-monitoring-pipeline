@@ -1,0 +1,33 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# --- Virtual environment ---
+venv/
+.venv/
+env/
+
+# --- Secrets / environment variables ---
+.env
+.env.*
+*.pem
+*.key
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+
+# --- OS ---
+.DS_Store
+
+# --- Editor ---
+.vscode/
+
+# --- Data & model artifacts (large/regenerable — don't belong in git history) ---
+data/
+mlruns/
+*.pkl
+*.joblib
+*.log
