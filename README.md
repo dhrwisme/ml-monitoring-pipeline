@@ -9,7 +9,7 @@ price-prediction model.
 🚧 Work in progress — Phase 1: project scaffolding.
 
 ## Motivation
-<!-- TODO: 2-3 sentences, your own words -->
+This is for getting to know MLOps
 
 ## Architecture (evolving)
-<!-- TODO: fill in as phases land -->
+Not sure yet, we'll figure out soon
