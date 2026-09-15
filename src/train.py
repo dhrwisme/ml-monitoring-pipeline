@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from src.monitor import save_baseline
 import pandas as pd
 import xgboost as xgb
 from sklearn.metrics import mean_absolute_error, root_mean_squared_error
@@ -65,3 +66,6 @@ if __name__ == "__main__":
 
     saved_path = save_model(model)
     print(f"Model saved to: {saved_path}")
+
+    baseline_path = save_baseline(X_train)
+    print(f"Feature baseline saved to: {baseline_path}")

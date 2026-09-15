@@ -2,12 +2,15 @@
 
 from pathlib import Path
 
+from src.monitor import init_db, log_prediction
 import pandas as pd
 import xgboost as xgb
 from fastapi import FastAPI
 from pydantic import BaseModel
 
 from src.features import FEATURE_COLUMNS
+
+init_db()
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 MODEL_PATH = PROJECT_ROOT / "models" / "xgb_v1.json"
@@ -45,5 +48,6 @@ def health():
 @app.post("/predict", response_model=PredictionResponse)
 def predict(request: PredictionRequest):
     row = pd.DataFrame([request.model_dump()])[FEATURE_COLUMNS]
-    prediction = model.predict(row)[0]
-    return PredictionResponse(predicted_consommation_15min_ahead=float(prediction))
+    prediction = float(model.predict(row)[0])
+    log_prediction(request.model_dump(), prediction)
+    return PredictionResponse(predicted_consommation_15min_ahead=prediction)
