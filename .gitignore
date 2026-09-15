@@ -31,3 +31,5 @@ mlruns/
 *.pkl
 *.joblib
 *.log
+
+models/
