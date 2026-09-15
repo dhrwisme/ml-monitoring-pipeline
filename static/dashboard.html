@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>RTE Consumption Forecast — Monitoring</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #0b0d12;
+    --panel: #131720;
+    --panel-border: #232838;
+    --text: #e7e9ee;
+    --text-dim: #8b93a7;
+    --accent: #5b8cff;
+    --accent-2: #ff8a5b;
+    --ok: #3ecf8e;
+    --warn: #f2b84b;
+    --bad: #ef5b6f;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f5f6f9;
+      --panel: #ffffff;
+      --panel-border: #e1e4ec;
+      --text: #14161c;
+      --text-dim: #5c6373;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 24px 16px 40px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  header { margin-bottom: 20px; }
+  h1 { font-size: 1.25rem; margin: 0 0 4px; font-weight: 600; }
+  .sub { color: var(--text-dim); font-size: 0.85rem; }
+  .sub .dot { display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:6px; background: var(--text-dim); }
+  .sub .dot.live { background: var(--ok); }
+  .tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .tile {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .tile .label { color: var(--text-dim); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; }
+  .tile .value { font-size: 1.6rem; font-weight: 600; margin-top: 4px; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 20px;
+  }
+  .panel h2 { font-size: 0.9rem; margin: 0 0 12px; font-weight: 600; }
+  .legend { display: flex; gap: 16px; font-size: 0.8rem; color: var(--text-dim); margin-bottom: 8px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+  svg { width: 100%; height: auto; display: block; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--panel-border); }
+  th { color: var(--text-dim); font-weight: 500; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.03em; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.72rem; font-weight: 600; }
+  .badge.ok { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+  .badge.drift { background: color-mix(in srgb, var(--bad) 18%, transparent); color: var(--bad); }
+  .empty { color: var(--text-dim); font-size: 0.85rem; padding: 8px 0; }
+  footer { color: var(--text-dim); font-size: 0.75rem; text-align: center; margin-top: 24px; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>RTE Consumption Forecast — Monitoring</h1>
+    <div class="sub"><span class="dot" id="live-dot"></span><span id="status-text">loading…</span></div>
+  </header>
+
+  <div class="tiles">
+    <div class="tile"><div class="label">Rolling MAE</div><div class="value" id="tile-mae">—</div></div>
+    <div class="tile"><div class="label">Reconciled predictions</div><div class="value" id="tile-matched">—</div></div>
+    <div class="tile"><div class="label">Pending reconciliation</div><div class="value" id="tile-pending">—</div></div>
+    <div class="tile"><div class="label">Features drifted</div><div class="value" id="tile-drift">—</div></div>
+  </div>
+
+  <div class="panel">
+    <h2>Predicted vs. actual (15-min-ahead consumption, MW)</h2>
+    <div class="legend">
+      <span><i style="background:var(--accent)"></i>predicted</span>
+      <span><i style="background:var(--accent-2)"></i>actual (RTE)</span>
+    </div>
+    <div id="chart-container"><div class="empty">No reconciled predictions yet.</div></div>
+  </div>
+
+  <div class="panel">
+    <h2>Feature drift vs. training baseline</h2>
+    <table id="drift-table">
+      <thead><tr><th>Feature</th><th>Recent mean</th><th>Baseline mean ± std</th><th>Status</th></tr></thead>
+      <tbody id="drift-body"><tr><td colspan="4" class="empty">Loading…</td></tr></tbody>
+    </table>
+  </div>
+
+  <footer>
+    Polls <code>/monitor/stats</code> every 30s. Actuals are joined in by a
+    scheduled job ~10 minutes after each prediction's target time, once
+    RTE has published the real reading.
+  </footer>
+</div>
+
+<script>
+const REFRESH_MS = 30000;
+
+function fmt(n, digits = 0) {
+  if (n === null || n === undefined || Number.isNaN(n)) return "—";
+  return Number(n).toLocaleString(undefined, { maximumFractionDigits: digits });
+}
+
+function renderChart(points) {
+  const container = document.getElementById("chart-container");
+  if (!points || points.length === 0) {
+    container.innerHTML = '<div class="empty">No reconciled predictions yet.</div>';
+    return;
+  }
+
+  const width = 900, height = 260, padL = 50, padR = 10, padT = 10, padB = 24;
+  const values = points.flatMap(p => [p.prediction, p.actual]);
+  const minV = Math.min(...values), maxV = Math.max(...values);
+  const pad = (maxV - minV) * 0.1 || 1;
+  const yMin = minV - pad, yMax = maxV + pad;
+
+  const x = i => padL + (i / Math.max(points.length - 1, 1)) * (width - padL - padR);
+  const y = v => padT + (1 - (v - yMin) / (yMax - yMin)) * (height - padT - padB);
+
+  const path = (key) => points.map((p, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(p[key]).toFixed(1)}`).join(" ");
+
+  const gridLines = [0, 0.25, 0.5, 0.75, 1].map(f => {
+    const v = yMin + f * (yMax - yMin);
+    const yy = y(v);
+    return `<line x1="${padL}" y1="${yy}" x2="${width - padR}" y2="${yy}" stroke="currentColor" stroke-opacity="0.08"/>
+            <text x="${padL - 6}" y="${yy + 3}" font-size="10" text-anchor="end" fill="currentColor" opacity="0.5">${fmt(v)}</text>`;
+  }).join("");
+
+  container.innerHTML = `
+    <svg viewBox="0 0 ${width} ${height}" style="color:var(--text)">
+      ${gridLines}
+      <path d="${path('actual')}" fill="none" stroke="var(--accent-2)" stroke-width="2"/>
+      <path d="${path('prediction')}" fill="none" stroke="var(--accent)" stroke-width="2"/>
+    </svg>`;
+}
+
+function renderDrift(rows) {
+  const body = document.getElementById("drift-body");
+  if (!rows || rows.length === 0) {
+    body.innerHTML = '<tr><td colspan="4" class="empty">No baseline yet — train the model to generate one.</td></tr>';
+    return;
+  }
+  body.innerHTML = rows.map(r => `
+    <tr>
+      <td>${r.feature}</td>
+      <td>${fmt(r.recent_mean, 1)}</td>
+      <td>${fmt(r.baseline_mean, 1)} ± ${fmt(r.baseline_std, 1)}</td>
+      <td><span class="badge ${r.drifted ? 'drift' : 'ok'}">${r.drifted ? 'DRIFT' : 'ok'}</span></td>
+    </tr>`).join("");
+}
+
+async function refresh() {
+  const dot = document.getElementById("live-dot");
+  const statusText = document.getElementById("status-text");
+  try {
+    const res = await fetch("/monitor/stats", { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    document.getElementById("tile-mae").textContent = data.rolling_mae !== null ? `${fmt(data.rolling_mae, 0)} MW` : "—";
+    document.getElementById("tile-matched").textContent = fmt(data.n_matched);
+    document.getElementById("tile-pending").textContent = fmt(data.pending_reconciliation);
+    document.getElementById("tile-drift").textContent = fmt((data.drift || []).filter(d => d.drifted).length);
+
+    renderChart(data.recent_points);
+    renderDrift(data.drift);
+
+    dot.classList.add("live");
+    statusText.textContent = `updated ${new Date().toLocaleTimeString()}`;
+  } catch (err) {
+    dot.classList.remove("live");
+    statusText.textContent = `couldn't reach /monitor/stats (${err.message})`;
+  }
+}
+
+refresh();
+setInterval(refresh, REFRESH_MS);
+</script>
+</body>
+</html>

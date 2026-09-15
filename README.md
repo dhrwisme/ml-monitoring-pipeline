@@ -43,8 +43,11 @@ https://ml-monitoring-pipeline.onrender.com
 (Free tier — the instance spins down after 15 minutes of inactivity; the
 first request after idle can take ~50 seconds to wake it back up.)
 
-Monitoring and drift-triggered retraining are designed but not yet
-implemented — see Architecture below.
+A live monitoring dashboard is up at
+[/dashboard](https://ml-monitoring-pipeline.onrender.com/dashboard),
+showing rolling accuracy against RTE's actual (since-published) readings
+and feature drift against the training baseline. Retraining is still
+triggered manually on drift, not automated — see Architecture below.
 
 ## Approach
 
@@ -64,11 +67,33 @@ implemented — see Architecture below.
 ## Architecture
 RTE API → src/ingest.py → src/features.py → src/train.py → model artifact
 → FastAPI (src/api.py) → Docker → Render (deployed)
-→ monitoring (prediction drift) → retraining trigger [designed, not implemented]
+→ every /predict logged to Postgres → GitHub Actions (every 15 min) calls
+  POST /monitor/reconcile, joining in RTE's actual readings once published
+→ GET /monitor/stats (rolling MAE, drift report) → /dashboard (polls stats,
+  renders it) → retraining trigger [manual today, not automated]
 
-CI (GitHub Actions) runs the test suite on every pull request. Deployment
-to Render is automatic on merge to `main`, via Render's native GitHub
-integration.
+**Why Postgres, not SQLite:** Render's free web services have no
+persistent disk — anything written to local container disk is lost on
+every restart, and the free instance restarts routinely (it spins down
+after 15 minutes idle). A monitoring dashboard whose data resets
+constantly isn't actually monitoring anything, so prediction logging
+lives in a free-tier external Postgres (Neon or Supabase) instead. See
+`.env.example` for the `DATABASE_URL` / `RECONCILE_TOKEN` variables this
+requires, both as local `.env` values and as real environment
+variables/secrets on Render and in the repo's GitHub Actions secrets.
+
+**Why a GitHub Actions cron, not an in-process scheduler:** the same
+free-tier spin-down means a scheduler running inside the FastAPI process
+wouldn't fire reliably — it's asleep whenever there's no traffic, which is
+exactly when a background job would need to run. A scheduled GitHub
+Actions workflow (`.github/workflows/reconcile.yml`) hits
+`POST /monitor/reconcile` from outside the service every 15 minutes
+instead, which also has the side effect of keeping the instance warm.
+
+CI (GitHub Actions) runs the test suite — including Postgres integration
+tests against a `postgres:16` service container — on every pull request.
+Deployment to Render is automatic on merge to `main`, via Render's native
+GitHub integration.
 
 **Note on the Azure pivot:** this was originally designed for Azure
 Container Apps. Partway through, Azure Student verification became
@@ -85,13 +110,17 @@ part of the deploy pipeline.
 
 ## Repo structure
 notebooks/  exploratory work — ingestion, features, training, evaluation
-src/        ingestion, feature engineering, training, and API serving as
-            tested, importable modules
-tests/      unit tests (leakage check, split-integrity check)
-.github/    CI workflow — runs tests on every pull request
+src/        ingestion, feature engineering, training, serving, and
+            monitoring (prediction logging, actuals reconciliation, drift)
+            as tested, importable modules
+static/     dashboard.html — served at /dashboard, polls /monitor/stats
+tests/      unit tests (leakage check, split-integrity check, drift/match
+            logic, Postgres integration tests)
+.github/    CI (tests on every PR) and the reconcile cron workflow
 Dockerfile  container definition for the FastAPI service
 data/       raw and processed data (gitignored)
-models/     trained model artifact (tracked in git — see Architecture note)
+models/     trained model artifact and feature baseline (tracked in git —
+            see Architecture note)
 
 
 ## Why this dataset
