@@ -32,6 +32,4 @@ mlruns/
 *.joblib
 *.log
 
-models/
-
 .pytest_cache/
