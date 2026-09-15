@@ -33,3 +33,5 @@ mlruns/
 *.log
 
 models/
+
+.pytest_cache/
