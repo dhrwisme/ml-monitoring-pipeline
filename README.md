@@ -33,10 +33,18 @@ generation by source, and RTE's own day-ahead forecasts.
 
 ## Status
 
-🚧 In progress — Phase 2 (data pipeline). Data ingestion, feature
-engineering, model training and evaluation are validated end-to-end in a
-notebook (`notebooks/01_explore_rte_data.ipynb`); the next step is
-extracting that logic into a tested, reusable pipeline (`src/`).
+Deployed. Ingestion, feature engineering, training, and evaluation are
+implemented as tested modules in `src/`, gated by CI on every pull request.
+The model is served via FastAPI, containerized with Docker, and deployed
+live on Render:
+
+https://ml-monitoring-pipeline.onrender.com
+
+(Free tier — the instance spins down after 15 minutes of inactivity; the
+first request after idle can take ~50 seconds to wake it back up.)
+
+Monitoring and drift-triggered retraining are designed but not yet
+implemented — see Architecture below.
 
 ## Approach
 
@@ -53,20 +61,37 @@ extracting that logic into a tested, reusable pipeline (`src/`).
 - **Validation:** chronological train/test split (no shuffling — this is
   a time series), verified with no date overlap between splits.
 
-## Architecture (target end state)
-RTE API → ingestion script → feature store (CSV/SQLite for now)
-→ training script → model artifact
-→ FastAPI serving container → Azure Container Apps
-→ monitoring (prediction drift) → retraining trigger
+## Architecture
+RTE API → src/ingest.py → src/features.py → src/train.py → model artifact
+→ FastAPI (src/api.py) → Docker → Render (deployed)
+→ monitoring (prediction drift) → retraining trigger [designed, not implemented]
 
-CI runs tests and builds the container on every PR; deployment to Azure
-happens on merge to `main`.
+CI (GitHub Actions) runs the test suite on every pull request. Deployment
+to Render is automatic on merge to `main`, via Render's native GitHub
+integration.
+
+**Note on the Azure pivot:** this was originally designed for Azure
+Container Apps. Partway through, Azure Student verification became
+unavailable (lost access to the required school email), so the project
+moved to Render instead — free tier, no credit card, and Docker-based
+GitHub auto-deploy that fit the remaining timeline. Given more time, Azure
+Container Apps remains the more production-representative target.
+
+**Note on the model artifact:** `models/xgb_v1.json` is committed directly
+to git rather than pulled from a model registry. This is a deliberate
+simplification for this project's scope and timeline — a longer-running
+system would store it in a registry (e.g. MLflow) or produce it fresh as
+part of the deploy pipeline.
 
 ## Repo structure
-notebooks/ exploratory work — ingestion, features, training, evaluation
-src/ (coming next) the same logic as importable, tested modules
-data/ raw and processed data (gitignored)
-models/ trained model artifacts (gitignored)
+notebooks/  exploratory work — ingestion, features, training, evaluation
+src/        ingestion, feature engineering, training, and API serving as
+            tested, importable modules
+tests/      unit tests (leakage check, split-integrity check)
+.github/    CI workflow — runs tests on every pull request
+Dockerfile  container definition for the FastAPI service
+data/       raw and processed data (gitignored)
+models/     trained model artifact (tracked in git — see Architecture note)
 
 
 ## Why this dataset
