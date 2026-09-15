@@ -1,0 +1,29 @@
+name: Reconcile prediction actuals
+
+on:
+  schedule:
+    # Every 15 minutes, matching the model's forecast horizon. GitHub Actions
+    # doesn't guarantee exact timing for scheduled workflows (low-activity
+    # repos especially can see a few minutes of drift) -- reconcile_actuals()
+    # is idempotent and only touches unreconciled rows, so a late or doubled
+    # run is harmless.
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call /monitor/reconcile
+        run: |
+          status=$(curl -s -o /tmp/response.json -w "%{http_code}" \
+            -X POST "${API_URL}/monitor/reconcile" \
+            -H "X-Reconcile-Token: ${RECONCILE_TOKEN}")
+          cat /tmp/response.json
+          if [ "$status" -ge 400 ]; then
+            echo "reconcile call failed with status $status"
+            exit 1
+          fi
+        env:
+          API_URL: ${{ secrets.API_URL }}
+          RECONCILE_TOKEN: ${{ secrets.RECONCILE_TOKEN }}
