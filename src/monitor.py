@@ -17,8 +17,14 @@ import pandas as pd
 import psycopg2
 import psycopg2.extras
 import requests
+from dotenv import load_dotenv
 
 from src.features import FEATURE_COLUMNS
+
+# So `python -m src.monitor` (run directly, not via the API process) also
+# picks up DATABASE_URL from a local .env -- src/api.py loads it too, but
+# that only covers the import-through-uvicorn path.
+load_dotenv()
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 BASELINE_PATH = PROJECT_ROOT / "models" / "feature_baseline.json"
